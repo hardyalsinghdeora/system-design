@@ -36,7 +36,6 @@
 | Submission records | 3 M × 2 KB metadata = **6 GB/day**; code itself ~5 KB → 15 GB/day | Relational DB for metadata, code in object storage or a large text column; ~8 TB/year total |
 | Test data | 3,000 problems × ~50 MB average = **150 GB** | Store in object storage; workers cache the hot problems on local SSD |
 | Leaderboard | 50k contestants × ~50 B in a sorted set = **2.5 MB** | One Redis sorted set per contest; reads are cheap |
-| Verdict pushes | 300 verdicts/s plus leaderboard updates to 50k viewers | WebSocket or Server-Sent Events, or 2-5 s polling cached at the edge |
 
 ## 3. API
 
@@ -194,7 +193,6 @@ Ranking is by problems solved (descending), then penalty time (ascending): time 
 - **Replication**: DB primary with synchronous standby; Redis leaderboard with a replica and rebuildable from `contest_scores`; the queue replicated so an acknowledged submission is never lost.
 - **Failure modes**: worker crash → job redelivered after the visibility timeout; sandbox escape attempt or kernel error → worker host is drained and replaced; queue backlog during a contest → users see `QUEUED` with position, and contest timing uses submission time, not judge time, so delays do not cost penalty; Redis down → rebuild from the database at the end, leaderboard temporarily stale.
 - **Monitoring**: queue depth and oldest job age per lane, verdict latency p50 and p99, worker utilisation, sandbox kills by reason, timing variance of a reference solution run every few minutes on each worker (detects noisy hardware).
-- **Abuse and security**: rate limits per user and IP; code size caps; workers on a separate network segment with egress blocked; output limits against disk filling; hidden test data protected from extraction (no stderr shown for hidden tests, limited verdict detail).
 - **Plagiarism detection**: after a contest, compare accepted solutions per problem with a token-based similarity method (normalise identifiers, then fingerprint with winnowing as MOSS does) and flag pairs above a threshold for human review. It runs offline, never on the judging path.
 
 ## 8. Trade-offs summary
@@ -213,6 +211,5 @@ Ranking is by problems solved (descending), then penalty time (ascending): time 
 - *"How do you make runtime measurements fair?"* Same instance type for all workers, one pinned core per run, CPU time from cgroups rather than wall-clock, and run each test more than once only if close to the limit.
 - *"What if a worker dies halfway through a submission?"* The job was not acked, so it is redelivered to another worker after the visibility timeout; the result handler ignores a second result for a `DONE` submission.
 - *"How do you support interactive problems?"* Run the user's program and a judge-provided interactor in the same sandbox group connected by pipes, each with its own limits.
-- *"How do you prevent someone from printing the hidden tests?"* Hidden test output and stderr are never returned; verdicts say only which test number failed. Rate limits make probing slow.
 - *"How do you handle a contest with 200k participants?"* The leaderboard set is still small (10 MB); the challenge is judging capacity, so pre-scale more workers, cache test data everywhere, and shed "Run" traffic first.
 - *"Why not run all tests in parallel to speed up the verdict?"* You can, across cores within one submission, but it uses more workers per submission during peaks and complicates "stop at first failure". Parallelise only when the queue is short.

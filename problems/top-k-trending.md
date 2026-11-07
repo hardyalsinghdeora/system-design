@@ -24,8 +24,6 @@
 - Accuracy: the top 10 must be right; positions 50-100 may be approximate if that saves a lot of cost. Exact counts are not shown to users.
 
 ### Out of scope
-- Showing exact counts to users ("1.2 M posts") beyond a rounded figure.
-- Storing per-user history of what they posted or played; this system only counts.
 - Spam and bot filtering models (we consume a verdict), personalised trends, the search ranking that uses these lists.
 
 ## 2. Estimation
@@ -38,7 +36,6 @@
 | 24 h exact | 24 hourly buckets, keys overlap, say 300 M distinct × 64 B ≈ **19 GB** | Still fits across a few workers; the cost is real but not prohibitive |
 | Count-Min Sketch | ε = 10^-4, δ = 10^-3 → width e/ε ≈ 27k, depth ln(1/δ) ≈ 7 → 190k counters × 4 B ≈ **760 KB** | Overcount at most ε × 83 M ≈ 8.3k per hour with probability 99.9 % |
 | Read QPS | 100 M users opening the app ~5 times/day → **6k/s**, peak 30k/s | Serve precomputed lists from a cache; never compute on read |
-| Kafka throughput | 115k/s × ~100 B = **11.5 MB/s** at peak | Network is not a constraint; CPU in stage 1 is |
 | Stage 2 input | 64 partitions × 600 lists × 100 entries per minute ≈ **3.8 M entries/min** | One merger process handles it; shard it by region if it grows |
 | Result size | 100 keys × 50 B = **5 KB** per (window, region) | 200 regions × 3 windows = 600 lists ≈ 3 MB; trivially cacheable |
 
@@ -170,8 +167,6 @@ The read side is deliberately boring. Each (window, region) list is written to R
 ## 7. Scaling and operations
 
 - **Partitioning**: Kafka partitioned by event key (64 partitions to start); stage 1 parallelism equals partition count. Region is a dimension inside each worker, not a partition key, so a key's global count is still complete in one place.
-- **Replication**: Kafka replication factor 3; Redis with one replica per shard; the columnar store replicated by the managed service.
-- **Hot keys**: producer-side pre-aggregation per second; stage 1 workers also combine in memory before updating state.
 - **State and recovery**: stage 1 checkpoints its keyed state every 30 s; after a failure it replays Kafka from the checkpoint. Because results are recomputed every minute from full state, a replay cannot double-count in the served list.
 - **Failure modes**: stage 2 down → Redis lists age and expire, API serves the last persisted list; one slow partition → stage 2 merges with that partition's previous list and flags staleness; Kafka lag → lists lag, monitored against wall clock.
 - **Multi-region**: run the pipeline in one region per continent for regional lists; the global list merges the regional top-Ks, which is exact only if each key is counted in one place, so global counts come from a separate job that receives pre-aggregated per-key counts from every region.
@@ -192,9 +187,7 @@ The read side is deliberately boring. Each (window, region) list is written to R
 ## 9. Follow-up questions interviewers ask
 
 - *"Why can't you just use a Redis sorted set with ZINCRBY?"* It works at small scale and for one window. At 100k events/s with 50 M keys and several sliding windows, the sorted sets grow large and every window needs its own eviction logic; the stream processor handles that better.
-- *"What is the error bound of the Count-Min Sketch here?"* Overcount at most ε × N = 10^-4 × 83 M ≈ 8.3k per hour with probability 99.9 %; it never undercounts.
 - *"How do you get top K for 'last 7 days'?"* Daily buckets, summed; or compute from the hourly table in the columnar store as a batch every 10 minutes, because 7-day trends do not need minute freshness.
 - *"A key is in partition 3 and that worker dies. What do users see?"* The list for the next minute or two uses partition 3's last local top-K; after recovery from checkpoint, the counts catch up from Kafka.
-- *"How would you make it per city instead of per country?"* Add city as a dimension in stage 1; output lists grow from 600 to tens of thousands, still small enough for Redis, but compute only for cities with enough traffic.
 - *"How do you test that the approximate path is good enough?"* Run exact and sketch-based counting side by side on a sample of traffic for a week and measure top-10 and top-100 overlap; ship the sketch only if top-10 overlap is 100 % and top-100 overlap is above an agreed bar such as 95 %.
 - *"How is this different from ad click aggregation?"* That needs exact, billable counts per key and stores all of them; here only the top of the distribution matters and nothing is billed, so approximation is acceptable. See [ad click aggregation](./ad-click-aggregation.md).

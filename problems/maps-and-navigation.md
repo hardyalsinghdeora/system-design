@@ -180,7 +180,6 @@ Geocoding is search: parse the input into components (number, street, city, post
 - **Map releases**: new graph and tile versions are built offline, validated (route regression tests on known trips, tile diff checks) and rolled out region by region; servers can run old and new versions side by side.
 - **Failure modes**: CDN edge down → clients go to another edge; routing region down → a replica in another zone serves; navigation service down → the app keeps navigating on the last route, because turn-by-turn runs on the device.
 - **Monitoring**: CDN hit ratio, route p99 per region, ETA error (predicted vs actual arrival, by region and trip length), share of edges with live data, ping pipeline lag, reroute rate.
-- **Security and abuse**: API keys with quotas for developers, rate limits against scraping tiles, location data access audited and pings anonymised.
 
 ## 8. Trade-offs summary
 
@@ -200,4 +199,3 @@ Geocoding is search: parse the input into components (number, street, city, post
 - *"How would offline maps work?"* Download vector tiles and routing tiles for a region; the device runs routing locally with historical speeds and no live traffic.
 - *"How do you keep ETA honest for a trip starting in 2 hours?"* Use historical speeds for the departure time slot, not current traffic.
 - *"How do you serve tiles for a brand-new road?"* It appears in the next data release; until then routing can include it if the graph build ran, which is a faster cycle than full tile rendering.
-- *"Where does the road graph come from?"* From the map data pipeline (licensed data, imagery, user edits, or OpenStreetMap). The interview usually treats it as a given input built offline.
